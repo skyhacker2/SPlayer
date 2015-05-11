@@ -9,7 +9,7 @@ public class MusicPlayState {
     public static final int PLAY_STATE_PAUSE = 0;
 
     // 播放
-    public static final int PLAY_STATE_PLAYING = 0;
+    public static final int PLAY_STATE_PLAYING = 1;
 
     public static int sCurrentState = PLAY_STATE_PAUSE;
 }

@@ -8,7 +8,7 @@ import java.util.ArrayList;
 public class MusicPlayData {
     public static ArrayList<MusicData> sMusicList = new ArrayList<>();
 
-    public static int sCurrentPlayIndex = 0;
+    public static int sCurrentPlayIndex = -1;
 
     public static int sCurrentPlayPosition = 0;
 

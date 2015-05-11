@@ -1,9 +1,16 @@
 package com.eleven.app.splayer;
 
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.database.Cursor;
 import android.media.Image;
 import android.media.MediaPlayer;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Message;
 import android.provider.MediaStore;
 import android.support.v7.app.ActionBarActivity;
@@ -38,24 +45,25 @@ public class MainActivity extends ActionBarActivity{
     private TextView mCurrentPlayTime;
     private TextView mMusicTotalTime;
 
+    // 播放服务
+    private PlayerService mPlayerService;
+
     private Cursor mCursor;
 
     private MusicListAdapter mAdapter;
-    private MediaPlayer mMediaPlayer;
 
-    private Timer mTimer;
-    private Handler mHandler = new Handler() {
+
+    // 服务绑定
+    private final ServiceConnection mServiceConnection = new ServiceConnection() {
         @Override
-        public void handleMessage(Message msg) {
-            switch (msg.what) {
-                case AUTO_UPDATE:
-                    if (mMediaPlayer != null && mMediaPlayer.isPlaying()) {
-                        int position = mMediaPlayer.getCurrentPosition();
-                        MusicPlayData.sCurrentPlayPosition = position;
-                        mSeekBar.setProgress(position);
-                        mCurrentPlayTime.setText(formatTime(position));
-                    }
-            }
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            mPlayerService = ((PlayerService.LocalBinder)service).getService();
+            initUI();
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            mPlayerService = null;
         }
     };
 
@@ -76,8 +84,6 @@ public class MainActivity extends ActionBarActivity{
         mAdapter = new MusicListAdapter(this, MusicPlayData.sMusicList);
         mMusicListView.setAdapter(mAdapter);
 
-        scheduleUpdate();
-
         mMusicListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -85,19 +91,17 @@ public class MainActivity extends ActionBarActivity{
                 MusicPlayData.sCurrentPlayIndex = position;
                 MusicPlayData.sCurrentPlayPosition = 0;
                 play();
-                setDurationAndCurrentTime();
+                initUI();
             }
         });
 
         mPlayButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (mMediaPlayer.isPlaying()) {
+                if (MusicPlayState.sCurrentState == MusicPlayState.PLAY_STATE_PLAYING) {
                     pause();
-                    updatePlayButton();
                 } else {
                     resume();
-                    updatePlayButton();
                 }
             }
         });
@@ -117,10 +121,9 @@ public class MainActivity extends ActionBarActivity{
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                if (mMediaPlayer != null) {
-                    mMediaPlayer.seekTo(MusicPlayData.sCurrentPlayPosition);
+                if (mPlayerService != null) {
+                    mPlayerService.getMediaPlayer().seekTo(MusicPlayData.sCurrentPlayPosition);
                 }
-                sendUpdateMessage(AUTO_UPDATE);
             }
         });
 
@@ -138,7 +141,31 @@ public class MainActivity extends ActionBarActivity{
             }
         });
 
+        Intent startPlayIntent = new Intent(this, PlayerService.class);
+        startService(startPlayIntent);
 
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (mPlayerService == null) {
+            Intent bindIntent = new Intent(this, PlayerService.class);
+            bindService(bindIntent, mServiceConnection, BIND_AUTO_CREATE);
+        }
+
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(PlayerService.PLAY);
+        intentFilter.addAction(PlayerService.PAUSE);
+        intentFilter.addAction(PlayerService.RESUME);
+        intentFilter.addAction(PlayerService.UPDATE_PROGRESS);
+        registerReceiver(mBroadcastReceiver, intentFilter);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        unregisterReceiver(mBroadcastReceiver);
     }
 
     @Override
@@ -150,9 +177,6 @@ public class MainActivity extends ActionBarActivity{
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
 
         //noinspection SimplifiableIfStatement
@@ -166,13 +190,7 @@ public class MainActivity extends ActionBarActivity{
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (mMediaPlayer != null) {
-            if (mMediaPlayer.isPlaying()) {
-                mMediaPlayer.stop();
-            }
-            mMediaPlayer.release();
-            mMediaPlayer = null;
-        }
+        unbindService(mServiceConnection);
     }
 
     /**
@@ -223,112 +241,75 @@ public class MainActivity extends ActionBarActivity{
     }
 
     private void play() {
-        if (mMediaPlayer != null) {
-            Log.d(TAG, "播放前先把之前的释放");
-            mMediaPlayer.release();
-            mMediaPlayer = null;
-        }
-        if (MusicPlayData.sMusicList.size() > 0) {
-            mMediaPlayer = new MediaPlayer();
-            if (MusicPlayData.sIsPlayNew) {
-                mMediaPlayer.reset();
-                try {
-                    mMediaPlayer.setDataSource(MusicPlayData.sMusicList.get(MusicPlayData.sCurrentPlayIndex).getFilePath());
-                    mMediaPlayer.prepare();
-                    MusicPlayData.sIsPlayNew = false;
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-            // 设置播放模式为正在播放
-            MusicPlayState.sCurrentState = MusicPlayState.PLAY_STATE_PLAYING;
-
-            mMediaPlayer.seekTo(MusicPlayData.sCurrentPlayPosition);;
-            mMediaPlayer.start();
-            mMediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                @Override
-                public void onCompletion(MediaPlayer mp) {
-                    playNext();
-                }
-            });
+        if (mPlayerService != null) {
+            mPlayerService.playMusic();
         }
     }
 
     private void pause() {
-        if (mMediaPlayer != null) {
-            mMediaPlayer.pause();
+        if (mPlayerService != null) {
+            mPlayerService.pauseMusic();
         }
     }
 
     private void resume() {
-        if (mMediaPlayer != null) {
-            mMediaPlayer.start();
+        if (mPlayerService != null){
+            mPlayerService.resumeMusic();
         }
     }
 
     private void playPrevious() {
-        int previousIndex = MusicPlayData.sCurrentPlayIndex - 1;
-        if (previousIndex < 0) {
-            return;
+        if (mPlayerService != null) {
+            mPlayerService.playPrevious();
         }
-        MusicPlayData.sCurrentPlayIndex = previousIndex;
-        MusicPlayData.sCurrentPlayPosition = 0;
-        MusicPlayData.sIsPlayNew = true;
-        play();
-        setDurationAndCurrentTime();
     }
 
     private void playNext() {
-        int nextIndex = MusicPlayData.sCurrentPlayIndex + 1;
-        if (nextIndex > MusicPlayData.sMusicList.size() - 1) {
-            return;
+        if (mPlayerService != null) {
+            mPlayerService.playNext();
         }
-        MusicPlayData.sCurrentPlayIndex = nextIndex;
-        MusicPlayData.sCurrentPlayPosition = 0;
-        MusicPlayData.sIsPlayNew = true;
-        play();
-        setDurationAndCurrentTime();
     }
 
-    private void initSeekAndText() {
-        mSeekBar.setProgress(0);
-        mCurrentPlayTime.setText("00:00");
-        mMusicTotalTime.setText("00:00");
-    }
-
-    private void updatePlayButton() {
-        if (mMediaPlayer == null) {
-            return;
-        }
-        if (mMediaPlayer.isPlaying()) {
-            mPlayButton.setImageResource(R.drawable.selector_pause_button);
+    private void initUI() {
+        MediaPlayer mediaPlayer = mPlayerService.getMediaPlayer();
+        if (mediaPlayer != null && MusicPlayState.sCurrentState == MusicPlayState.PLAY_STATE_PLAYING) {
+            mSeekBar.setProgress(MusicPlayData.sCurrentPlayPosition);
+            mMusicTotalTime.setText(formatTime(mediaPlayer.getDuration()));
+            mCurrentPlayTime.setText(formatTime(MusicPlayData.sCurrentPlayPosition));
+            mSeekBar.setMax(mediaPlayer.getDuration());
         } else {
-            mPlayButton.setImageResource(R.drawable.selector_play_button);
+            mSeekBar.setProgress(0);
+            mMusicTotalTime.setText("00:00");
+            mCurrentPlayTime.setText("00:00");
         }
+
+        updatePlayButton();
+        updateList();
     }
 
-    private void updateListViewSelect() {
+
+    private void updateList() {
         if (MusicPlayData.sCurrentPlayIndex > -1) {
             mAdapter.setSelectedIndex(MusicPlayData.sCurrentPlayIndex);
             mAdapter.notifyDataSetChanged();
         }
     }
 
-    private void setDurationAndCurrentTime() {
-        int index = MusicPlayData.sCurrentPlayIndex;
-        if (index >=0 && index < MusicPlayData.sMusicList.size()) {
-            updateListViewSelect();
-            if (mMediaPlayer != null) {
-                mMusicTotalTime.setText(formatTime(mMediaPlayer.getDuration()));
-                MusicPlayData.sTotalTime = mMediaPlayer.getDuration();
-                mSeekBar.setMax(mMediaPlayer.getDuration());
-                mSeekBar.setProgress(0);
-            }
-        } else {
-            initSeekAndText();
-        }
-        updatePlayButton();
+    private void updateProgress() {
+        mSeekBar.setProgress(MusicPlayData.sCurrentPlayPosition);
+        mMusicTotalTime.setText(formatTime(MusicPlayData.sTotalTime));
+        mCurrentPlayTime.setText(formatTime(MusicPlayData.sCurrentPlayPosition));
+        mSeekBar.setMax(MusicPlayData.sTotalTime);
     }
+
+    private void updatePlayButton() {
+        if (MusicPlayState.sCurrentState == MusicPlayState.PLAY_STATE_PLAYING) {
+            mPlayButton.setImageResource(R.drawable.selector_pause_button);
+        } else {
+            mPlayButton.setImageResource(R.drawable.selector_play_button);
+        }
+    }
+
 
     private String formatTime(int time) {
         time /= 1000;
@@ -347,22 +328,27 @@ public class MainActivity extends ActionBarActivity{
         }
     }
 
-    private void sendUpdateMessage(int type) {
-        Message msg = Message.obtain();
-        msg.what = type;
-        mHandler.sendMessage(msg);
-    }
-
-    /**
-     * 启动定时器
-     */
-    private void scheduleUpdate() {
-        mTimer = new Timer();
-        mTimer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                sendUpdateMessage(AUTO_UPDATE);
+    // 监听service的广播
+    private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action.equals(PlayerService.PLAY)) {
+                updatePlayButton();
+                updateList();
+                updateProgress();
             }
-        }, 0, 1000);
-    }
+            else if (action.equals(PlayerService.PAUSE)) {
+                updatePlayButton();
+                updateList();
+            }
+            else if (action.equals(PlayerService.RESUME)) {
+                updatePlayButton();
+                updateList();
+            }
+            else if (action.equals(PlayerService.UPDATE_PROGRESS)) {
+                updateProgress();
+            }
+        }
+    };
 }
