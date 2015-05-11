@@ -10,4 +10,4 @@ This code show you how to use `ContentResolver` to get the music list and use `M
 3. Play next or play previous
 
 #Screenshot
-![image](./images/Screenshot_2015-05-11-11-10-21.png)
+![image](./images/Screenshot_2015-05-11-11-10-21_min.png)
