@@ -160,12 +160,16 @@ public class MainActivity extends ActionBarActivity{
         intentFilter.addAction(PlayerService.RESUME);
         intentFilter.addAction(PlayerService.UPDATE_PROGRESS);
         registerReceiver(mBroadcastReceiver, intentFilter);
+
+        if (mPlayerService != null) {
+            initUI();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        unregisterReceiver(mBroadcastReceiver);
+
     }
 
     @Override
@@ -191,6 +195,7 @@ public class MainActivity extends ActionBarActivity{
     protected void onDestroy() {
         super.onDestroy();
         unbindService(mServiceConnection);
+        unregisterReceiver(mBroadcastReceiver);
     }
 
     /**

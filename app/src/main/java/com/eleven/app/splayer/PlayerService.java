@@ -1,11 +1,16 @@
 package com.eleven.app.splayer;
 
+import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.media.MediaPlayer;
 import android.os.Binder;
 import android.os.IBinder;
+import android.support.v4.app.NotificationCompat;
 import android.util.Log;
+import android.widget.RemoteViews;
+import android.widget.RemoteViewsService;
 
 import java.io.IOException;
 import java.util.Timer;
@@ -26,6 +31,8 @@ public class PlayerService extends Service {
     public static final String UPDATE_PROGRESS = "com.eleven.app.splayer.UPDATE_PROGRESS";
 
     public static final String EXTRA_PROGRESS = "com.eleven.app.splayer.EXTRA_PROGRESS";
+
+    public static final int NOTIFICATION_ID = 123456;
 
     private MediaPlayer mMediaPlayer;
     private IBinder mIBinder = new LocalBinder();
@@ -92,6 +99,7 @@ public class PlayerService extends Service {
             intent.setAction(PLAY);
             sendBroadcast(intent);
             scheduleUpdate();
+            showNotification();
         }
     }
 
@@ -170,4 +178,28 @@ public class PlayerService extends Service {
         }, 0, 1000);
     }
 
+    private void showNotification() {
+        String songName = MusicPlayData.sMusicList.get(MusicPlayData.sCurrentPlayIndex).getMusicName();
+        PendingIntent pi = PendingIntent.getActivity(getApplicationContext(), 0,
+                new Intent(getApplicationContext(), MainActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this);
+        builder.setSmallIcon(R.mipmap.ic_music_play);
+        builder.setTicker("SPlayer");
+        builder.setContentTitle("SPlayer");
+        builder.setContentText(songName);
+        builder.setContentIntent(pi);
+        Intent actionIntent = new Intent(this, PlayerService.class);
+        PendingIntent actionPendingIntent = PendingIntent.getService(this, 0, actionIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        builder.addAction(R.mipmap.ic_music_pause, "暂停", actionPendingIntent);
+        builder.setPriority(NotificationCompat.PRIORITY_HIGH);
+
+        RemoteViews views = new RemoteViews(getPackageName(), R.layout.notifaction);
+        views.setCharSequence(R.id.musicName, "setText", songName);
+
+        builder.setContent(views);
+
+        startForeground(NOTIFICATION_ID, builder.build());
+    }
 }
